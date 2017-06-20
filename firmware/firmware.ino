@@ -40,8 +40,8 @@ int measureAveraged(uint8_t sampleCount) {
   uint8_t i;
   uint16_t sum = 0;
   for(i = sampleCount; i--;) {
+    delay(5);
     sum += measureSensor();
-    delay(1);
   }
   return sum/sampleCount;
 }
@@ -55,10 +55,12 @@ void serialEvent() {
   // Read message from PC app
   while(Serial.available() && !s_bSerialRxReady) {
     char c = (char)Serial.read();
-    s_szSerialBfr[s_ubSerialBfrLength] = c;
-    ++s_ubSerialBfrLength;
     
-    if(c == '\n') {
+    if(c != '\n') {
+      s_szSerialBfr[s_ubSerialBfrLength] = c;
+      ++s_ubSerialBfrLength;      
+    }
+    else {
       s_bSerialRxReady = true;
       s_szSerialBfr[s_ubSerialBfrLength] = '\0';
       ++s_ubSerialBfrLength;      
@@ -70,13 +72,16 @@ void serialProcessCmd(void) {
   if(!s_bSerialRxReady)
     return;
   if(!strcmp(s_szSerialBfr, "read")) {
-    // Serial.writeln("reading"); 
     doScan(false);
   }
   else if(!strcmp(s_szSerialBfr, "readBetter")) {
-    // Serial.writeln("reading better"); 
     doScan(true);
   }
+  else {
+    Serial.print("Invalid cmd!\n");
+  }
+  s_bSerialRxReady = false;
+  s_ubSerialBfrLength = 0;
 }
 
 // //////////////////////////////////////////////////////////// READOUT
@@ -90,6 +95,7 @@ void doScan(bool bidir) {
   char txBfr[50];
 
   // Make sure you're on A
+  // Serial.println("Going to A");
   while(digitalRead(4) == LOW) {
     myStepper.step(1);
   }
@@ -97,8 +103,9 @@ void doScan(bool bidir) {
   steps = 0;
 
   // Go to B doing measurements
+  // Serial.println("Measuring while going to B");
   while(digitalRead(3) == LOW) {
-    samples[steps] = measureAveraged(10);
+    samples[steps] = measureAveraged(2);
     myStepper.step(-1); // step(-) makes movement towards B
     steps += 1;
   }
@@ -108,27 +115,33 @@ void doScan(bool bidir) {
 
   if(bidir) {
     // Go to A doing measurements
+    // Serial.println("Measuring while going to A");
     while(digitalRead(4) == LOW) {
       myStepper.step(1);
       steps -= 1;
-      samples[steps] = (samples[steps] + measureAveraged(10)) / 2;
+      samples[steps] = (samples[steps] + measureAveraged(2)) / 2;
     }
   }
   else {
     // Go to A without measurements
+    // Serial.println("Going to A");
     while(digitalRead(4) == LOW)
-      myStepper.step(steps);
-      steps = 0;
+      myStepper.step(1);
+    steps = 0;
   }
 
-  // Make 5 steps towards B so we won't press A continuously.
-  myStepper.step(-5);
+  // Make some steps towards B so we won't press A continuously.
+  myStepper.step(-10);
+  myStepper.step(1);
+  myStepper.step(0);
 
   // Send data
   for(i = 0; i != maxSteps; ++i) {
-    sprintf(txBfr, "%d;%u\n", i, samples[i]);
-    Serial.print(txBfr);
+    sprintf(txBfr, "%d;%u", i, samples[i]);
+    Serial.println(txBfr);
+    delay(10);
   }
+  Serial.print("end\n");
 }
 
 // //////////////////////////////////////////////////////////// ARDUINO MAIN
@@ -140,6 +153,8 @@ void setup() {
   // initialize the serial port:
   Serial.begin(9600);
   pinMode(13, OUTPUT);
+  s_bSerialRxReady = false;
+  s_ubSerialBfrLength = 0;
 }
 
 void loop() {
